@@ -1,0 +1,533 @@
+<html>
+  <head>
+    <script>
+      var selector_html;
+      var NUMBER_POOL = 6;
+      var NUM_SELECTORS = 4;
+      var MAX_GUESSES = 9;
+      var GUESS_BUTTON_Y_OFFSET = -35.5;
+      var GUESS_BUTTON_X_OFFSET = 0;
+      var RESULT_Y_OFFSET = 0;
+      var RESULT_X_OFFSET = 0;
+      var ROW_HEIGHT = 24;
+      var histor = [];
+      var secret = [];
+      var is_win = false;
+      var is_loss = false;
+      var game_board;
+      var the_row;
+      var the_num;
+      var current_guesses = [0,0,0,0,0];
+      var colors = [0,0,0,0,0,0,0]
+
+      function show_guesses(row) {
+        var guesses_list = window.document.getElementById('guesses_list');
+        var guesses = window.document.getElementById("svg_guesses").innerHTML;
+        guesses = guesses.replaceAll("__row", "__" + row);
+        guesses = guesses.replaceAll("__the_row_num__", row);
+        guesses = g_transform_relative( guesses, 0, (row - 1)* ROW_HEIGHT*1); 
+        guesses_list.innerHTML = guesses_list.innerHTML + guesses;
+
+      }
+
+      function init_svg() {
+        var full_board_template = window.document.getElementById("svg_full_board").innerHTML;
+        game_board = window.document.getElementById("game_board");
+        game_board.innerHTML = full_board_template;
+
+        set_secret();
+        the_row = 1;
+        show_guesses(the_row)
+      }
+
+      function g_transform_relative(svg_snippet, x_rel, y_rel) {
+        // similar function to g_translate_relative below only affects transform= in g group
+        var xy_exp = /translate\(([\-0-9.]+),([\-0-9.]+)\)"/;
+        var xy = svg_snippet.match(xy_exp);
+        var x = Number(xy[1]) + x_rel;
+        var y = Number(xy[2]) + y_rel;
+        var new_translate = "translate(" + x + "," + y + ")";
+        svg_snippet = svg_snippet.replace(/translate\([\-0-9.]+,[\-0-9.]+\)/, new_translate);
+        return svg_snippet;
+      }
+
+      function g_translate_relative(svg_snippet, x_rel, y_rel) {
+        var all_x_exp = /[\sc]x="[\-0-9.]+"/g;
+        var one_x_num = /[\sc]x="([\-0-9.]+)"/;
+        var x_list = svg_snippet.match(all_x_exp);
+        x_list.forEach(x => {
+          var x_match = x.match(one_x_num);
+          var x_val = Number(x_match[1]);
+          x_val = x_val + x_rel;
+          var x_final = ' x="' + x_val + '"';
+          
+          svg_snippet = svg_snippet.replace(x, x_final)
+        });
+        var all_y_exp = /[\sc]y="[\-0-9.]+"/g;
+        var one_y_num = /[\sc]y="([\-0-9.]+)"/;
+        var y_list = svg_snippet.match(all_y_exp);
+        y_list.forEach(y => {
+          var y_match = y.match(one_y_num);
+          var y_val = Number(y_match[1]);
+          y_val = y_val + y_rel;
+          var y_final = ' y="' + y_val + '"';
+          
+          svg_snippet = svg_snippet.replace(y, y_final)
+        });       
+        return svg_snippet;
+      }
+
+      function show_guess_button(row) {
+        var guess_button_template = window.document.getElementById("svg_guess_button").innerHTML;
+        var the_y = GUESS_BUTTON_Y_OFFSET + ((row-1) * ROW_HEIGHT*0.25*(1/20))
+        guess_button_template = g_transform_relative(guess_button_template, GUESS_BUTTON_X_OFFSET, the_y)
+        var guesses_row_obj = window.document.getElementById("guess_button_anchor__"+row);
+        guesses_row_obj.innerHTML = guess_button_template;
+
+      }
+
+      function show_result(row, result) {
+        var result_template = window.document.getElementById("svg_result").innerHTML;
+        var the_y = RESULT_Y_OFFSET + ((row-1) * ROW_HEIGHT*0.25 *(1/20));
+        result_template = g_transform_relative(result_template, RESULT_X_OFFSET, the_y);
+        result_template = result_template.replaceAll("__row", "__" + row);
+
+        var result_obj = window.document.getElementById("result_anchor__"+row);
+        result_obj.innerHTML = result_template;
+
+        for (var i=0;i<result.length;i++) {
+          if (!result[i]) {
+            break;
+          } 
+          var the_result = window.document.getElementById("res_" + i + "__" + row);
+          the_result.style.display = "inline";
+          if (result[i] === "*") {
+            the_result.style.fill = "#000000";
+          } else {
+            the_result.style.fill = "#ffffff";
+          }
+        } 
+
+        the_row += 1;
+        if (the_row > MAX_GUESSES) {
+          is_loss = true;
+        }
+
+        if (!is_loss && !is_win) {
+          show_guesses(the_row);
+        }
+
+      }
+
+      function close_guess_button() {
+        window.document.getElementById('guess_button_anchor__' + the_row).innerHTML = "";window.document.getElementById('color_picker_anchor__' + the_row).innerHTML = "";
+      }
+
+      function show_color_select(num, row, position_x) {
+        if (row != the_row) {  // Disables previous row's buttons.
+          return;
+        }
+        var color_selector_template = window.document.getElementById("svg_color_picker").innerHTML;
+        color_selector_template = g_translate_relative(color_selector_template, position_x  - 20, (row - 1)*ROW_HEIGHT*0.25*(1/20));
+        var color_selector_obj = window.document.getElementById("color_picker_anchor__" + row);
+        color_selector_obj.innerHTML = color_selector_template;
+        var color_selector_movable = window.document.getElementById("color_picker");
+        //color_selector_movable.transform="translate("+position_x+",70)";
+        the_num = num;
+        // Check if colors need to be initialized
+        if (colors[1] === 0) {
+          for (var i=1;i<colors.length;i++) {
+            colors[i] = window.document.getElementById('color_'+i).style.fill;
+          }
+        }
+      }
+
+      function set_color(color) {
+        current_guesses[the_num] = color;
+        var disk_id = "num_" + the_num + "__" + the_row;
+        var disk_obj = window.document.getElementById(disk_id);
+        disk_obj.style.fill = colors[color];
+        disk_obj.style.fillOpacity = 100;
+
+        // Check for full guesses
+        var guesses_full = true;
+        for (var i=1;i<current_guesses.length;i++) {
+          if (current_guesses[i] === 0) {
+            guesses_full = false
+          }
+        }
+        if (guesses_full) {
+          show_guess_button(the_row);
+        }
+      }
+
+      function close_color_picker() {
+        window.document.getElementById('color_picker_anchor__' + the_row).innerHTML = "";
+      }
+
+      function getRandomInt(min, max) {
+
+        var r_max = 20000;  // Make requested max inclusive
+        var r_min = 1;
+        max++;
+        var ran =  Math.floor(Math.random() * (r_max) + 1); 
+        var range = max - min;
+        var result = ran % range + min;
+        return result;
+      }
+
+      function set_secret() {
+
+        secret[0] = 0;
+        for (var i=1;i<=NUM_SELECTORS;i++) {
+          secret[i] = getRandomInt(1,NUMBER_POOL);
+        }
+      }
+
+      function do_guess() {
+        guesses = [...current_guesses]
+        var full_guess_result = test_guess(guesses);
+        histor.push({guess: guesses, result: full_guess_result.res, summary: full_guess_result.summary});
+        // show_board(histor)
+        close_guess_button();
+        show_result(the_row, full_guess_result.res);
+        current_guesses = [0,0,0,0,0];
+      }
+
+      function test_guess(guess_array) {
+        result_list = [];
+        secret_list = [...secret];
+        guess_list = [...guess_array];
+        exact_count = 0;
+        var result_summary = "nothing";
+        for (var i=1;i<=NUM_SELECTORS;i++) {
+          if (guess_list[i] == secret_list[i]) {
+            result_list.push("*");
+            result_summary = "exact";
+            exact_count++;
+            secret_list[i] = "----";
+            guess_list[i] = "++++";
+          }
+        }
+        for (var i=1;i<=NUM_SELECTORS;i++) {
+          for (var j=1;j<=NUM_SELECTORS;j++) {
+            if (guess_list[i] == secret_list[j] && i != j) {
+              result_list.push("o");
+              if ( result_summary === "nothing" ) {
+                result_summary = "correct";
+              }
+              secret_list[j] = "----";
+              guess_list[i] = "++++";
+              continue;
+            }
+          }
+        }
+        if (exact_count == NUM_SELECTORS) {
+          result_summary = "win";
+          is_win = true;
+          alert("You won!")
+        }
+        return {summary: result_summary, res: result_list};
+      }
+
+      function new_game() {
+        histor = [];
+        secret = [];
+        is_win = false;
+        is_loss = false;
+        init_svg();
+      }
+    </script>
+
+  </head>
+ 
+ 
+  <body>
+    <template id="svg_full_board">
+      <g id="full_board">
+        <rect
+            style="fill:#d39973;fill-opacity:1;stroke:#000000;stroke-width:0.307995"
+            id="guess_board"
+            width="85.04023"
+            height="218.50079"
+            x="1.9854366"
+            y="1.7947043" ></rect>
+
+
+        <rect
+            style="fill:#d39973;fill-opacity:1;stroke:#000000;stroke-width:0.262563"
+            id="result_board"
+            width="30.226797"
+            height="218.54625"
+            x="91.928314"
+            y="1.5100787" ></rect>
+
+        <rect
+          style="fill:#ffffff;fill-opacity:0;stroke:none"
+          id="spacer"
+          width="2"
+          height="20"
+          x="2"
+          y="219"></rect>  
+
+        <g id="guesses_list"></g>   
+
+        <g id="results_list">
+           
+        </g>   
+
+      </g>
+    </template>
+
+    <template id="svg_guesses">
+      <g id="guesses__row"  transform="translate(0,0)">
+        <g id="color_picker_anchor__row"></g>
+        <text
+            xml:space="preserve"
+            style="font-size:5.64444px;line-height:1.25;font-family:'Cooper Black';-inkscape-font-specification:'Cooper Black, ';stroke-width:0.264583"
+            x="19.029451"
+            y="17.496592"
+            id="row_digit-5"><tspan
+              sodipodi:role="line"
+              id="tspan1094-5-8"
+              x="19.029451"
+              y="17.496592"
+              style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:5.64444px;font-family:Calibri;-inkscape-font-specification:Calibri;stroke-width:0.264583">?</tspan></text>
+        <ellipse
+            onmouseover="show_color_select(1,__the_row_num__,20.4);"
+            style="fill:#4afcc5;fill-opacity:0;stroke:#000000;stroke-width:0.254"
+            id="num_1__row"
+            cx="20.390951"
+            cy="15.616949"
+            rx="6.6817379"
+            ry="6.2808337" ></ellipse>
+        <text
+            xml:space="preserve"
+            style="font-size:5.64444px;line-height:1.25;font-family:'Cooper Black';-inkscape-font-specification:'Cooper Black, ';stroke-width:0.264583"
+            x="56.057808"
+            y="17.496592"
+            id="row_digit-5-3"><tspan
+              sodipodi:role="line"
+              id="tspan1094-5-8-0"
+              x="56.057808"
+              y="17.496592"
+              style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:5.64444px;font-family:Calibri;-inkscape-font-specification:Calibri;stroke-width:0.264583">?</tspan></text>
+        <ellipse
+            onmouseover="show_color_select(3,__the_row_num__,57.4);"
+            style="fill:#faf90e;fill-opacity:0;stroke:#000000;stroke-width:0.254"
+            id="num_3__row"
+            cx="57.419308"
+            cy="15.616949"
+            rx="6.6817379"
+            ry="6.2808337" ></ellipse>
+        <text
+            xml:space="preserve"
+            style="font-size:5.64444px;line-height:1.25;font-family:'Cooper Black';-inkscape-font-specification:'Cooper Black, ';stroke-width:0.264583"
+            x="37.543629"
+            y="17.496592"
+            id="row_digit-5-1"><tspan
+              sodipodi:role="line"
+              id="tspan1094-5-8-5"
+              x="37.543629"
+              y="17.496592"
+              style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:5.64444px;font-family:Calibri;-inkscape-font-specification:Calibri;stroke-width:0.264583">?</tspan></text>
+        <ellipse
+            onmouseover="show_color_select(2,__the_row_num__,38.9);"
+            style="fill:#1a1ae8;fill-opacity:0;stroke:#000000;stroke-width:0.254"
+            id="num_2__row"
+            cx="38.905128"
+            cy="15.616949"
+            rx="6.6817379"
+            ry="6.2808337" ></ellipse>
+        <text
+            xml:space="preserve"
+            style="font-size:5.64444px;line-height:1.25;font-family:'Cooper Black';-inkscape-font-specification:'Cooper Black, ';stroke-width:0.264583"
+            x="74.571976"
+            y="17.496592"
+            id="row_digit-5-7"><tspan
+              sodipodi:role="line"
+              id="tspan1094-5-8-8"
+              x="74.571976"
+              y="17.496592"
+              style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:5.64444px;font-family:Calibri;-inkscape-font-specification:Calibri;stroke-width:0.264583">?</tspan></text>
+        <ellipse
+            onmouseover="show_color_select(4,__the_row_num__,75.9);"
+            style="fill:#ff8f09;fill-opacity:0;stroke:#000000;stroke-width:0.254"
+            id="num_4__row"
+            cx="75.933479"
+            cy="15.616949"
+            rx="6.6817379"
+            ry="6.2808337" ></ellipse>
+        <text
+            xml:space="preserve"
+            style="font-size:5.64444px;line-height:1.25;font-family:'Cooper Black';-inkscape-font-specification:'Cooper Black, ';stroke-width:0.264583"
+            x="6.6368885"
+            y="17.412531"
+            id="row_digit__row"><tspan
+              sodipodi:role="line"
+              id="tspan1094-5"
+              x="6.6368885"
+              y="17.412531"
+              style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:5.64444px;font-family:Calibri;-inkscape-font-specification:Calibri;stroke-width:0.264583">__the_row_num__</tspan></text>
+        <g id="guess_button_anchor__row"></g>
+        <g id="result_anchor__row"></g>
+      </g>
+    </template>
+
+    <template id="svg_color_picker">
+      <g onmouseleave="close_color_picker();" id="color_picker" class="class_color_picker" transform="translate(5.858631,70.870535)">
+        <rect
+            style="fill:#f9f9f9;fill-opacity:1;stroke:#000000;stroke-width:0.254"
+            id="rect1022"
+            width="15.308036"
+            height="30.049107"
+            x="6.6145835"
+            y="-48.191963" ></rect>
+        <rect
+            onclick="set_color(1)"
+            style="fill:#1a1ae8;fill-opacity:1;stroke:#000000;stroke-width:0.242499"
+            id="color_1"
+            width="6.0261273"
+            height="5.8615699"
+            x="7.6729169"
+            y="-45.01696" ></rect>
+        <rect
+            onclick="set_color(3)"
+            style="fill:#4afcc5;fill-opacity:1;stroke:#000000;stroke-width:0.242499"
+            id="color_3"
+            width="6.0261278"
+            height="5.8615699"
+            x="7.6729169"
+            y="-36.5555" ></rect>
+        <rect
+            onclick="set_color(5)"
+            style="fill:#ff8f09;fill-opacity:1;stroke:#000000;stroke-width:0.242499"
+            id="color_5"
+            width="6.0261278"
+            height="5.8615699"
+            x="7.6729169"
+            y="-28.09404"
+            inkscape:transform-center-x="2.2382761"
+            inkscape:transform-center-y="-14.559384" ></rect>
+        <rect
+            onclick="set_color(2)"
+            style="fill:#30950f;fill-opacity:1;stroke:#000000;stroke-width:0.242499"
+            id="color_2"
+            width="6.0261278"
+            height="5.8615699"
+            x="15.076447"
+            y="-44.865696" ></rect>
+        <rect
+            onclick="set_color(4)"
+            style="fill:#faf90e;fill-opacity:1;stroke:#000000;stroke-width:0.242499"
+            id="color_4"
+            width="6.0261278"
+            height="5.8615699"
+            x="15.076447"
+            y="-36.404232" ></rect>
+        <rect
+            onclick="set_color(6)"
+            style="fill:#ea3e2b;fill-opacity:1;stroke:#000000;stroke-width:0.242499"
+            id="color_6"
+            width="6.0261278"
+            height="5.8615699"
+            x="15.076447"
+            y="-27.942774"
+            inkscape:transform-center-x="2.2382755"
+            inkscape:transform-center-y="-14.559383" ></rect>
+      </g>      
+    </template>
+
+    <template id="svg_guess_button">
+      <g onmouseover="close_color_picker()" onclick="do_guess()" id="guess_button" transform="translate(-7.1329204,80.886905)">
+     <path
+        style="fill:#ffd000;fill-opacity:1;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+        d="m 91.470238,-33.639881 -0.188989,7.9375 h 14.741071 l 5.10268,-3.96875 -6.04762,-3.96875 z"
+        id="path1092-9" ></path>
+     <text
+        xml:space="preserve"
+        style="font-size:4.23333px;line-height:1.25;font-family:'Cooper Black';-inkscape-font-specification:'Cooper Black, ';stroke-width:0.264583"
+        x="93.611153"
+        y="-28.597839"
+        id="text1096-7"><tspan
+          sodipodi:role="line"
+          id="tspan1094-2"
+          x="93.611153"
+          y="-28.597839"
+          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.93889px;font-family:Calibri;-inkscape-font-specification:Calibri;stroke-width:0.264583">Guess</tspan></text>
+      </g>
+    </template>
+
+    <template id="svg_result">
+      <g id="results" transform="translate(10.583334,0.1889881)">
+        <rect
+            style="fill:#fc814d;fill-opacity:1;stroke:#000000;stroke-width:0.228685"
+            id="rect918"
+            width="16.844221"
+            height="16.844221"
+            x="70.701614"
+            y="-65.635025"
+            transform="rotate(45.523173)" ></rect>
+        <ellipse
+            style="fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:0.132166;display:none"
+            id="res_0__row"
+            cx="90.053215"
+            cy="16.239265"
+            rx="3.4767566"
+            ry="3.2681513" ></ellipse>
+        <ellipse
+            style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:0.132166;display:none"
+            id="res_1__row"
+            cx="96.259071"
+            cy="10.231074"
+            rx="3.4767566"
+            ry="3.2681513"
+            inkscape:transform-center-x="18.976136"
+            inkscape:transform-center-y="-6.1471991" ></ellipse>
+        <ellipse
+            style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:0.132166;display:none"
+            id="res_2__row"
+            cx="102.139"
+            cy="16.378275"
+            rx="3.4767566"
+            ry="3.2681513"
+            inkscape:transform-center-x="18.976136"
+            inkscape:transform-center-y="-6.1471991" ></ellipse>
+        <ellipse
+            style="fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:0.132166;display:none"
+            id="res_3__row"
+            cx="96.005959"
+            cy="21.969868"
+            rx="3.4767566"
+            ry="3.2681513" ></elipse>
+      </g>
+    </template>
+
+    <button onclick="new_game();">New Game</button><br/>
+
+    <svg
+      xmlns:dc="http://purl.org/dc/elements/1.1/"
+      xmlns:cc="http://creativecommons.org/ns#"
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:svg="http://www.w3.org/2000/svg"
+      xmlns="http://www.w3.org/2000/svg"
+      xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+      xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+      width="125mm"
+      height="265mm"
+      viewBox="0 0 125 225"
+      version="1.1"
+      id="svg8"
+      inkscape:version="1.0.1 (3bc2e813f5, 2020-09-07)"
+      sodipodi:docname="mm_board.svg">
+
+      <g id="game_board"></g>
+    
+    </svg>
+
+    <script language="javascript">
+      init_svg();
+    </script> 
+  </body>
+</html>
+
